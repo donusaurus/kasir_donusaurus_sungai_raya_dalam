@@ -2,77 +2,207 @@
 <html lang="id">
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Donusaurus POS - Serdam</title>
-
-<style>
-body{font-family:sans-serif;background:#f5f5f5;margin:0;padding:20px}
-.container{max-width:500px;margin:auto;background:white;padding:20px;border-radius:10px}
-h1{text-align:center}
-input,select,button{width:100%;padding:10px;margin-top:10px;border-radius:8px;border:1px solid #ccc}
-button{background:black;color:white;font-weight:bold}
-.success{margin-top:15px;padding:10px;background:#eaffea;border-radius:8px}
-</style>
+<title>Struk Donusaurus</title>
 </head>
 
 <body>
-
-<div class="container">
-  <h1>Donusaurus POS</h1>
-  <p style="text-align:center">Sungai Raya Dalam (Serdam)</p>
-
-  <input id="nama" placeholder="Nama Customer">
-  
-  <select id="metode">
-    <option>Cash</option>
-    <option>QRIS</option>
-    <option>Transfer</option>
-  </select>
-
-  <input id="total" placeholder="Total (angka saja)">
-  <input id="bayar" placeholder="Uang Bayar (Cash saja)">
-
-  <button onclick="checkout()">Bayar</button>
-
-  <div id="result"></div>
-</div>
+<div style="font-family:monospace;padding:20px">Memuat struk...</div>
 
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycbzdTXyYEVCHzmTD7vi7_q_CaVl_OPBNFtVjEP-_HwpOVmiDE25pndvcVZdeXKKsFxE/exec";
 
-const STRUK_URL = "https://donusaurus.github.io/struk_donosaurus_sungai_raya_dalam/";
+window.addEventListener("load", loadReceipt);
 
-function checkout(){
-  let nama = document.getElementById("nama").value || "-";
-  let metode = document.getElementById("metode").value;
-  let total = Number(document.getElementById("total").value || 0);
-  let bayar = Number(document.getElementById("bayar").value || 0);
+function getParam(name){
+  return new URL(window.location.href).searchParams.get(name);
+}
 
-  fetch(API_URL,{
-    method:"POST",
-    body: JSON.stringify({
-      nama:nama,
-      metode:metode,
-      total:total,
-      bayar:bayar
-    })
-  })
-  .then(res=>res.json())
-  .then(data=>{
-    if(data.status==="success"){
-      let link = data.linkStruk;
+function toNumber(n){
+  return Number(String(n || "0").replace(/[^\d]/g, "")) || 0;
+}
 
-      document.getElementById("result").innerHTML = `
-        <div class="success">
-          <b>Order Berhasil</b><br><br>
-          ID: ${data.orderID}<br><br>
-          <button onclick="window.open('${link}')">Lihat Struk</button>
+function rp(n){
+  return toNumber(n).toLocaleString("id-ID");
+}
+
+function orderNo(n){
+  return String(n || "").replace(/[^\d]/g, "").padStart(3, "0");
+}
+
+function escapeHtml(value){
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function safeSplit(v){
+  return String(v || "").split(" | ");
+}
+
+function getQtyFromItem(item){
+  let match = String(item || "").match(/^(\d+)x/i);
+  return match ? Number(match[1]) : 1;
+}
+
+function shortItemName(item){
+  return String(item || "")
+    .replace("Box Donat (6 pcs)", "Box Donat (6 Pcs)")
+    .replace("Pcs Donat", "Pcs Donat");
+}
+
+function parseAddOnLine(text){
+  const line = String(text || "").trim();
+  const match = line.match(/^(.*?)\s*=\s*Rp([\d.]+)$/i);
+  if(!match){
+    return { label: line, total: 0 };
+  }
+  return {
+    label: match[1].trim(),
+    total: toNumber(match[2])
+  };
+}
+
+function renderDetailLines(text){
+  return String(text || "")
+    .split(", ")
+    .map(x => x.trim())
+    .filter(x => x && x !== "-")
+    .map(x => `<div class="flavor">- ${escapeHtml(x)}</div>`)
+    .join("");
+}
+
+async function loadReceipt(){
+  let id = getParam("id");
+
+  if(!id){
+    document.body.innerHTML = "ID struk tidak ditemukan";
+    return;
+  }
+
+  try{
+    let res = await fetch(API_URL + "?id=" + encodeURIComponent(id));
+    let data = await res.json();
+
+    if(data.error){
+      document.body.innerHTML = data.message || "Struk tidak ditemukan";
+      return;
+    }
+
+    showReceipt(data);
+
+  }catch(err){
+    document.body.innerHTML = "Gagal memuat struk: " + err.message;
+  }
+}
+
+function showReceipt(data){
+  let items = safeSplit(data.item);
+  let rasa = safeSplit(data.rasa);
+  let harga = safeSplit(data.harga);
+  let rows = "";
+  let addOnRows = "";
+  let addOns = safeSplit(data.addOn).filter(x => x && x !== "-");
+
+  items.forEach((it, i) => {
+    if(!it || it === "-") return;
+
+    let lineTotal = toNumber(harga[i] || data.total);
+    let qty = getQtyFromItem(it);
+    let hargaSatuan = qty > 0 ? lineTotal / qty : lineTotal;
+
+    rows += `
+      <div class="item-line">
+        <span>${escapeHtml(shortItemName(it))} @Rp${rp(hargaSatuan)}</span>
+        <b>Rp${rp(lineTotal)}</b>
+      </div>
+    `;
+
+    rows += renderDetailLines(rasa[i]);
+    rows += `<div class="item-gap"></div>`;
+  });
+
+  if(addOns.length){
+    addOnRows += `<hr><div class="section"><div class="section-title">Add On</div>`;
+    addOns.forEach(line => {
+      const item = parseAddOnLine(line);
+      addOnRows += `
+        <div class="item-line">
+          <span>${escapeHtml(item.label)}</span>
+          <b>${item.total ? "Rp" + rp(item.total) : ""}</b>
         </div>
       `;
-    }
-  })
-  .catch(err=>{
-    alert("Error: "+err);
-  });
+    });
+    addOnRows += `</div>`;
+  }
+
+  document.body.innerHTML = `
+    <style>
+      body{
+        font-family:monospace;
+        font-size:10px;
+        padding:10px;
+      }
+
+      .center{text-align:center}
+      .item-line{
+        display:flex;
+        justify-content:space-between;
+      }
+      .item-gap{height:6px}
+      hr{border:0;border-top:1px dashed #000;margin:6px 0}
+    </style>
+
+    <div class="center">
+      Donusaurus<br>
+      Sungai Raya Dalam (Serdam)<br>
+      Komplek Permata Khatulistiwa<br>
+      Blok Melati No. 9
+    </div>
+
+    <hr>
+
+    <div>
+      Order ID: #${orderNo(data.orderID)} / ${escapeHtml(data.kodeUnik)}<br>
+      Customer: ${escapeHtml(data.nama || "-")} (${escapeHtml(data.sumber || "-")})<br>
+      ${escapeHtml(data.tanggal)}, ${escapeHtml(data.jam)}
+    </div>
+
+    <hr>
+
+    ${rows || "-"}
+
+    ${addOnRows}
+
+    <hr>
+
+    <div class="item-line">
+      <span>Total</span>
+      <b>Rp${rp(data.total)}</b>
+    </div>
+
+    <div>Metode: ${escapeHtml(data.metode)}</div>
+
+    ${String(data.metode) === "Cash" ? `
+      <div class="item-line">
+        <span>Bayar</span>
+        <span>Rp${rp(data.bayar)}</span>
+      </div>
+      <div class="item-line">
+        <span>Kembali</span>
+        <span>Rp${rp(data.kembalian)}</span>
+      </div>
+    ` : ""}
+
+    <hr>
+
+    <div class="center">
+      Terima kasih 🙏<br>
+      Follow @donusaurus
+    </div>
+  `;
 }
 </script>
 
