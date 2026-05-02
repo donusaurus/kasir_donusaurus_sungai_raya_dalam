@@ -1615,7 +1615,7 @@ function renderCart(){
   const totals = getCartTotals();
 
   if(cart.length === 0){
-    html = `<div class="empty-cart">Belum ada item donat</div>`;
+    html = `<div class="empty-cart">Belum ada item</div>`;
   }else{
     cart.forEach((c, i) => {
       html += `
